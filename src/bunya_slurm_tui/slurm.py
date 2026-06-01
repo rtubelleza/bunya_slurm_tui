@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 # TODO: maybe call these from some spec request rather than static constants
 BunyaPartition = Literal["general", "gpu_cuda", "gpu_rocm", "gpu_sxm", "gpu_viz"]
-BunyaQoS = Literal["normal", "debug", "short", "gpu", "mig", "sxm", "sdf", "viz"]
+BunyaQoS = Literal["normal", "debug", "short", "gpu", "mig", "sxm", "sdf", "viz", "short"]
 BunyaArchConstraint = Literal["epyc3", "epyc4"]
 
 
