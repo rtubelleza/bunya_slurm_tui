@@ -15,6 +15,7 @@ authors = [
 
 [project.scripts]
 run-slurm = "bunya_slurm_tui.tui:main"
+create-slurm = "bunya_slurm_tui.tui:create_main"
 
 [build-system]
 requires = ["hatchling"]

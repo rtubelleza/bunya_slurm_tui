@@ -355,6 +355,33 @@ def _mask(key: str, value: str) -> str:
     return value
 
 
+def _validate_file(file_path: Path) -> int | None:
+    """Shared file checks; returns an exit code on hard failure, else None."""
+    if not file_path.exists():
+        CONSOLE.print(f"[red]file not found:[/red] {file_path}")
+        return 1
+    if file_path.suffix != ".py":
+        CONSOLE.print(
+            f"[yellow]warning:[/yellow] {file_path} is not a .py — "
+            "inline_script_path expects Python."
+        )
+    return None
+
+
+def _build_spec_interactive(file_path: Path) -> BunyaSlurmJobSpec | int:
+    """Run the interactive prompt loop; returns a spec or an exit code."""
+    while True:
+        try:
+            return _build_spec(file_path)
+        except ValidationError as e:
+            CONSOLE.print(f"[red]validation failed:[/red]\n{e}")
+            if not questionary.confirm("Try again?", default=True).unsafe_ask():
+                return 2
+        except KeyboardInterrupt:
+            CONSOLE.print("\n[yellow]aborted[/yellow]")
+            return 130
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Interactive sbatch wrapper for Bunya."
@@ -365,26 +392,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if not args.file.exists():
-        CONSOLE.print(f"[red]file not found:[/red] {args.file}")
-        return 1
-    if args.file.suffix != ".py":
-        CONSOLE.print(
-            f"[yellow]warning:[/yellow] {args.file} is not a .py — "
-            "inline_script_path expects Python."
-        )
+    rc = _validate_file(args.file)
+    if rc is not None:
+        return rc
 
-    while True:
-        try:
-            spec = _build_spec(args.file)
-            break
-        except ValidationError as e:
-            CONSOLE.print(f"[red]validation failed:[/red]\n{e}")
-            if not questionary.confirm("Try again?", default=True).unsafe_ask():
-                return 2
-        except KeyboardInterrupt:
-            CONSOLE.print("\n[yellow]aborted[/yellow]")
-            return 130
+    spec = _build_spec_interactive(args.file)
+    if isinstance(spec, int):
+        return spec
 
     _print_summary(spec)
     script = spec.to_script_content()
@@ -406,6 +420,68 @@ def main() -> int:
         return result.returncode
 
     CONSOLE.print(f"[green]{result.stdout.strip()}[/green]")
+    return 0
+
+
+def create_main() -> int:
+    """Like `run-slurm`, but writes the rendered sbatch script to a .sh file
+    instead of submitting it. The script can later be submitted with `sbatch`.
+    """
+    parser = argparse.ArgumentParser(
+        description="Interactively build a Bunya sbatch script and write it to a .sh file."
+    )
+    parser.add_argument("file", type=Path, help="Python file to run via SLURM.")
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=None,
+        help="Path to write the .sh script (default: <job_name>.sh in the cwd).",
+    )
+    parser.add_argument(
+        "--show-script", action="store_true", help="Print the rendered script."
+    )
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Overwrite the output file if it already exists.",
+    )
+    args = parser.parse_args()
+
+    rc = _validate_file(args.file)
+    if rc is not None:
+        return rc
+
+    spec = _build_spec_interactive(args.file)
+    if isinstance(spec, int):
+        return spec
+
+    _print_summary(spec)
+    script = spec.to_script_content()
+    if args.show_script:
+        CONSOLE.print(Syntax(script, "bash", line_numbers=False))
+
+    out_path = args.output or Path.cwd() / f"{spec.job_name}.sh"
+    if out_path.suffix != ".sh":
+        out_path = out_path.with_suffix(".sh")
+
+    if out_path.exists() and not args.force:
+        overwrite = questionary.confirm(
+            f"{out_path} exists — overwrite?", default=False
+        ).unsafe_ask()
+        if not overwrite:
+            CONSOLE.print("[yellow]not written.[/yellow]")
+            return 0
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(script)
+    out_path.chmod(0o755)
+
+    _save_profile(spec)
+
+    CONSOLE.print(f"[green]wrote sbatch script to {out_path}[/green]")
+    CONSOLE.print(f"[dim]submit it with:[/dim] sbatch {out_path}")
     return 0
 
 
